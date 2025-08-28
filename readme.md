@@ -26,6 +26,7 @@ MathmaticalModeling/
         kinematics.py      # 运动学相关度量
       viz/
         heatmap.py         # 热力图绘制
+        merge.py           # 图片整合
         trace.py           # 节点轨迹绘制
       __init__.py
     
