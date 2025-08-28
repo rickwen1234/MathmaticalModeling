@@ -2,6 +2,9 @@
 from __future__ import annotations
 import io, math
 from typing import Iterable, Union
+import matplotlib
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 
 
 try:
