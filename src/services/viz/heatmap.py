@@ -10,6 +10,14 @@ __all__ = ["render_heatmap", "heatmap_speed", "heatmap_accel"]
 
 
 def render_heatmap(data, t, label, title, out_png=None):
+    """
+    Render a heatmap visualization for the given data over time.
+    - data: 2D array to visualize
+    - t: time array
+    - label: colorbar label
+    - title: plot title
+    - out_png: optional output file path to save the figure
+    """
     plt.figure(figsize=(9,4.8))
     plt.imshow(
     data, aspect="auto", origin="lower",
@@ -25,6 +33,14 @@ def render_heatmap(data, t, label, title, out_png=None):
 
 
 def heatmap_speed(t, pos, v=None, title=None, out_png=None):
+    """
+    Generate and render a speed heatmap from position or velocity data.
+    - t: time array
+    - pos: position array
+    - v: optional velocity array
+    - title: plot title
+    - out_png: optional output file path
+    """
     if v is None:
         v = velocity_from_positions(t, pos)
     data = speed_from_velocities(v)
@@ -32,5 +48,13 @@ def heatmap_speed(t, pos, v=None, title=None, out_png=None):
 
 
 def heatmap_accel(t, pos, v=None, title=None, out_png=None):
+    """
+    Generate and render an acceleration heatmap from position or velocity data.
+    - t: time array
+    - pos: position array
+    - v: optional velocity array
+    - title: plot title
+    - out_png: optional output file path
+    """
     data = accel_mag_from_positions(t, pos, v)
     render_heatmap(data, t, "Acceleration (m/s²)", title or "Acceleration heatmap", out_png)
