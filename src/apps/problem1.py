@@ -41,3 +41,24 @@ speed = np.linalg.norm(vel, axis=2)
 labels = ["head_front"] + [f"bench_{i}_front" for i in range(1,223)] + ["tail_rear"]
 export_chain_csv(path, t, pos, vel, labels, out_csv="result1_chain.csv")
 plot_speed_heatmap(speed, t, "Problem 1 (p=0.55 m): speed heatmap")
+
+# Export snapshots for specified times and node indices
+import pandas as pd
+snapshot_times = [0, 60, 120, 180, 240, 300]
+snapshot_indices = [0, 1, 51, 101, 151, 201, 223]
+rows = []
+for t_snap in snapshot_times:
+    # Find the index in t closest to t_snap
+    i = int(np.where(t == t_snap)[0][0])
+    for j in snapshot_indices:
+        rows.append({
+            "time_s": float(t[i]),
+            "handle_index": j,
+            "handle_label": labels[j] if j < len(labels) else f"node_{j}",
+            "x_m": float(pos[i, j, 0]),
+            "y_m": float(pos[i, j, 1]),
+            "vx_mps": float(vel[i, j, 0]),
+            "vy_mps": float(vel[i, j, 1]),
+            "speed_mps": float(speed[i, j]),
+        })
+pd.DataFrame(rows).to_csv("problem1_snapshots.csv", index=False)

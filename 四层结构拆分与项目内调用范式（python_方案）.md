@@ -24,7 +24,7 @@ project/
   README.md
 ```
 
-> 依赖方向：**apps → rigid_chain → path → geometry**（单向）。
+> 依赖方向：**apps → rigid_chain → path → geometry**（单向）。    
 
 ---
 

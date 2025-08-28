@@ -6,8 +6,13 @@ Includes functions for exporting chain data to CSV/XLSX and plotting results.
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from services.viz.trace import node_path, node_velocity
+from services.viz.heatmap import heatmap_accel, heatmap_speed
 
-__all__ = ["export_chain_csv", "export_chain_xlsx", "plot_speed_heatmap", "plot_path"]
+__all__ = [
+    "export_chain_csv", "export_chain_xlsx", "plot_speed_heatmap", "plot_path",
+    "plot_heatmap", "heatmap_speed", "heatmap_accel", "node_path", "node_velocity"
+]
 
 def export_chain_csv(path, t_arr, positions, velocities, labels, out_csv):
     # Export chain simulation data to a CSV file
@@ -98,3 +103,10 @@ def plot_path(in_xy, out_xy, arc1_xy, arc2_xy, R_turn, title, out_png=None):
     plt.legend(); plt.grid(True)
     if out_png: plt.savefig(out_png, dpi=150, bbox_inches="tight")
     plt.show()
+
+def plot_heatmap(t_arr, positions, velocities=None, mode="speed", title=None, out_png=None):
+    if mode == "speed":
+        return heatmap_speed(t_arr, positions, velocities, title, out_png)
+    if mode == "acc":
+        return heatmap_accel(t_arr, positions, velocities, title, out_png)
+    raise ValueError("mode must be 'speed' or 'acc'")
