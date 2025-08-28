@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 from services.path import FastInSpiralOnly
 from services.rigid_chain import solve_chain_s_incremental
-from apps.common_io import export_chain_csv, plot_speed_heatmap
+from apps.common_io import export_chain_csv, plot_speed_heatmap, heatmap_accel
 
  # Geometric parameters
 p1_pitch = 0.55
@@ -20,6 +20,9 @@ Nnodes = len(link_lengths)+1
 t = np.arange(0, 301, 10.0)
 pos = np.zeros((len(t), Nnodes, 2))
 vel = np.zeros_like(pos)
+
+HEAD = 0
+TAIL = Nnodes - 1
 
 s_prev = None
 s_head_prev = None
@@ -41,6 +44,7 @@ speed = np.linalg.norm(vel, axis=2)
 labels = ["head_front"] + [f"bench_{i}_front" for i in range(1,223)] + ["tail_rear"]
 export_chain_csv(path, t, pos, vel, labels, out_csv="result1_chain.csv")
 plot_speed_heatmap(speed, t, "Problem 1 (p=0.55 m): speed heatmap")
+heatmap_accel(t, pos, title="Problem 1 (p=0.55 m): acceleration heatmap")
 
 # Export snapshots for specified times and node indices
 import pandas as pd

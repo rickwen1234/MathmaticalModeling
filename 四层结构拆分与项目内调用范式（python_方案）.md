@@ -24,7 +24,7 @@ project/
   README.md
 ```
 
-> 依赖方向：**apps → rigid_chain → path → geometry**（单向）。    
+> 依赖方向：**apps → rigid_chain → path → geometry**（单向）。
 
 ---
 
@@ -568,4 +568,394 @@ python -m src.apps.problem4
 ```
 
 > 若要提高分辨率，只改 `t = np.arange(...)` 步长即可；其它模块无需改动。
+
+
+
+---
+
+## 轻量化 `common_io` 与解耦：把“计算 vs. 作图”拆到专用模块
+为避免 `common_io` 变成“万金油大杂烩”，把**数值派生**与**绘图呈现**分离：
+
+```
+src/
+  services/
+    geometry.py
+    path.py
+    rigid_chain.py
+  metrics/
+    kinematics.py        # 速度/加速度等派生量计算
+    coords.py            # ← 新增：坐标系变换（极坐标/正交坐标/可选弗雷内）
+  viz/
+    heatmap.py           # 所有热图渲染
+    trace.py             # 单节点轨迹/速度曲线
+  apps/
+    common_io.py         # 作为外观/门面，仅薄薄转发
+```
+
+### `metrics/kinematics.py`
+```python
+# src/metrics/kinematics.py
+import numpy as np
+
+__all__ = [
+    "velocity_from_positions", "acceleration_from_positions",
+    "speed_from_velocities", "accel_mag_from_positions",
+]
+
+def _assert_uniform_dt(t):
+    dt = np.diff(t)
+    if not np.allclose(dt, dt[0]):
+        raise ValueError("t_arr must be uniform for finite differences")
+    return float(dt[0])
+
+def velocity_from_positions(t, pos):
+    dt = _assert_uniform_dt(t)
+    v = np.zeros_like(pos)
+    v[1:-1] = (pos[2:] - pos[:-2])/(2*dt)
+    v[0]    = (pos[1] - pos[0]) / dt
+    v[-1]   = (pos[-1] - pos[-2]) / dt
+    return v
+
+def acceleration_from_positions(t, pos, v=None):
+    if v is None:
+        v = velocity_from_positions(t, pos)
+    dt = _assert_uniform_dt(t)
+    a = np.zeros_like(pos)
+    a[1:-1] = (v[2:] - v[:-2])/(2*dt)
+    a[0]    = (v[1]  - v[0]) / dt
+    a[-1]   = (v[-1] - v[-2]) / dt
+    return a
+
+def speed_from_velocities(v):
+    return np.linalg.norm(v, axis=2)
+
+def accel_mag_from_positions(t, pos, v=None):
+    a = acceleration_from_positions(t, pos, v)
+    return np.linalg.norm(a, axis=2)
+```
+
+### `metrics/coords.py`
+```python
+# src/metrics/coords.py
+from __future__ import annotations
+import math
+import numpy as np
+
+__all__ = [
+    "polar_series", "orthogonal_series", "coords_df", "export_node_coords_csv"
+]
+
+def _unit(w):
+    w = np.asarray(w, dtype=float)
+    n = np.linalg.norm(w)
+    if n < 1e-15:
+        raise ValueError("axis vector has near-zero norm")
+    return w / n
+
+def _gram_schmidt(e1, e2=None):
+    e1 = _unit(e1)
+    if e2 is None:
+        # choose any perpendicular
+        e2 = np.array([-e1[1], e1[0]], dtype=float)
+    e2 = e2 - np.dot(e2, e1) * e1
+    e2 = _unit(e2)
+    return e1, e2
+
+def polar_series(t, pos, node: int = 0, origin=(0.0, 0.0), ref_axis=(1.0, 0.0), unwrap=True):
+    """给定节点的极坐标时间序列 (r(t), θ(t))。
+    - origin: 极点（默认原点）
+    - ref_axis: θ=0 的参考方向（默认 +x 轴）
+    - unwrap: 是否解缠绕 θ（跨越 ±π 时保持连续）
+    返回形状 (T, 2) 的数组，以及字段名 ["r", "theta"].
+    """
+    p = pos[:, node, :] - np.asarray(origin, dtype=float)
+    r = np.linalg.norm(p, axis=1)
+    th0 = math.atan2(ref_axis[1], ref_axis[0])
+    th = np.arctan2(p[:, 1], p[:, 0]) - th0
+    if unwrap:
+        th = np.unwrap(th)
+    return np.stack([r, th], axis=1), ("r", "theta")
+
+def orthogonal_series(t, pos, node: int = 0, origin=(0.0, 0.0), axis_x=(1.0, 0.0), axis_y=None):
+    """将节点坐标投影到任意正交基 (e_x, e_y)：返回 (u(t), v(t))。
+    - axis_x: 主轴方向；axis_y 可选，若给出则与 axis_x 正交归一化（Gram-Schmidt）。
+    - origin: 新坐标系的原点（默认世界原点）。
+    返回形状 (T, 2) 的数组，以及字段名 ["u", "v"].
+    """
+    e1, e2 = _gram_schmidt(np.asarray(axis_x, float), None if axis_y is None else np.asarray(axis_y, float))
+    p = pos[:, node, :] - np.asarray(origin, dtype=float)
+    u = p @ e1
+    v = p @ e2
+    return np.stack([u, v], axis=1), ("u", "v")
+
+def coords_df(t, pos, node: int, mode: str = "polar", **kw):
+    import pandas as pd
+    if mode == "polar":
+        arr, names = polar_series(t, pos, node=node, **kw)
+    elif mode == "orth":
+        arr, names = orthogonal_series(t, pos, node=node, **kw)
+    else:
+        raise ValueError("mode must be 'polar' or 'orth'")
+    df = pd.DataFrame({
+        "time_s": np.asarray(t, dtype=float),
+        "node": int(node),
+        names[0]: arr[:, 0],
+        names[1]: arr[:, 1],
+    })
+    return df
+
+def export_node_coords_csv(t, pos, node: int, mode: str, out_csv: str, **kw):
+    df = coords_df(t, pos, node=node, mode=mode, **kw)
+    df.to_csv(out_csv, index=False)
+    return out_csv
+```
+
+### `viz/heatmap.py`
+```python
+# src/viz/heatmap.py
+import numpy as np
+import matplotlib.pyplot as plt
+from ..metrics.kinematics import (
+    velocity_from_positions, speed_from_velocities, accel_mag_from_positions,
+)
+
+__all__ = ["render_heatmap", "heatmap_speed", "heatmap_accel"]
+
+def render_heatmap(data, t, label, title, out_png=None):
+    plt.figure(figsize=(9,4.8))
+    plt.imshow(
+        data, aspect="auto", origin="lower",
+        extent=[0, data.shape[1]-1, float(t[0]), float(t[-1])]
+    )
+    plt.xlabel("Handle index (0=head_front, N-1=tail_rear)")
+    plt.ylabel("Time (s)")
+    plt.title(title)
+    plt.colorbar(label=label)
+    if out_png:
+        plt.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.show()
+
+def heatmap_speed(t, pos, v=None, title=None, out_png=None):
+    if v is None:
+        v = velocity_from_positions(t, pos)
+    data = speed_from_velocities(v)
+    render_heatmap(data, t, "Speed (m/s)", title or "Speed heatmap", out_png)
+
+def heatmap_accel(t, pos, v=None, title=None, out_png=None):
+    data = accel_mag_from_positions(t, pos, v)
+    render_heatmap(data, t, "Acceleration (m/s²)", title or "Acceleration heatmap", out_png)
+```
+
+### `viz/trace.py`
+```python
+# src/viz/trace.py
+import numpy as np
+import matplotlib.pyplot as plt
+from ..metrics.kinematics import velocity_from_positions
+
+__all__ = ["node_path", "node_velocity"]
+
+def node_path(t, pos, node=0, title=None, out_png=None):
+    p = pos[:, node, :]
+    plt.figure(figsize=(6,6))
+    plt.plot(p[:,0], p[:,1])
+    plt.xlabel("x (m)"); plt.ylabel("y (m)")
+    plt.title(title or f"Node {node} Position")
+    plt.grid(True); plt.gca().set_aspect("equal")
+    if out_png:
+        plt.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.show()
+
+def node_velocity(t, pos=None, vel=None, node=0, title=None, out_png=None):
+    if vel is None:
+        if pos is None:
+            raise ValueError("need pos or vel")
+        vel = velocity_from_positions(t, pos)
+    v = vel[:, node, :]
+    plt.figure(figsize=(9,4.8))
+    plt.plot(t, v[:,0], label="vx (m/s)")
+    plt.plot(t, v[:,1], label="vy (m/s)")
+    plt.xlabel("Time (s)"); plt.ylabel("Velocity (m/s)")
+    plt.title(title or f"Node {node} Velocity")
+    plt.legend(); plt.grid(True)
+    if out_png:
+        plt.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.show()
+```
+
+### `apps/common_io.py`（门面/薄包装）
+```python
+# src/apps/common_io.py
+from ..viz.heatmap import heatmap_speed, heatmap_accel
+from ..viz.trace import node_path, node_velocity
+from ..viz.merge import merge as merge_plots, merge_paths
+from ..metrics.coords import polar_series, orthogonal_series, coords_df, export_node_coords_csv
+
+__all__ = [
+    # 可视化
+    "heatmap_speed", "heatmap_accel", "node_path", "node_velocity",
+    # 合并
+    "merge_plots", "merge_paths",
+    # 坐标导出
+    "polar_series", "orthogonal_series", "coords_df", "export_node_coords_csv",
+]
+
+# 兼容旧 API（可选）：
+
+def plot_heatmap(t_arr, positions, velocities=None, mode="speed", title=None, out_png=None):
+    if mode == "speed":
+        return heatmap_speed(t_arr, positions, velocities, title, out_png)
+    if mode == "acc":
+        return heatmap_accel(t_arr, positions, velocities, title, out_png)
+    raise ValueError("mode must be 'speed' or 'acc'")
+```python
+# src/apps/common_io.py
+from ..viz.heatmap import heatmap_speed, heatmap_accel
+from ..viz.trace import node_path, node_velocity
+from ..metrics.coords import polar_series, orthogonal_series, coords_df, export_node_coords_csv
+
+__all__ = [
+    # 可视化
+    "heatmap_speed", "heatmap_accel", "node_path", "node_velocity",
+    # 坐标导出
+    "polar_series", "orthogonal_series", "coords_df", "export_node_coords_csv",
+]
+
+# 兼容旧 API（可选）：
+
+def plot_heatmap(t_arr, positions, velocities=None, mode="speed", title=None, out_png=None):
+    if mode == "speed":
+        return heatmap_speed(t_arr, positions, velocities, title, out_png)
+    if mode == "acc":
+        return heatmap_accel(t_arr, positions, velocities, title, out_png)
+    raise ValueError("mode must be 'speed' or 'acc'")
+```
+
+### 使用示例
+```python
+from apps.common_io import (
+    polar_series, orthogonal_series, export_node_coords_csv,
+)
+
+# 极坐标（以原点为极点，+x 为参考轴；θ 解缠绕）
+arr, names = polar_series(t_arr, positions, node=101, origin=(0,0), ref_axis=(1,0), unwrap=True)
+# 导出 CSV
+export_node_coords_csv(t_arr, positions, node=101, mode="polar", out_csv="node101_polar.csv")
+
+# 正交坐标（以某自定义轴 e_x、与其正交的 e_y）
+arr2, names2 = orthogonal_series(t_arr, positions, node=101, origin=(0,0), axis_x=(0.6,0.8))
+export_node_coords_csv(t_arr, positions, node=101, mode="orth", out_csv="node101_orth.csv", axis_x=(0.6,0.8))
+```
+
+### 扩展（可选）
+- 若需要**随路径切向的弗雷内坐标**（切向/法向），可在 `metrics/coords.py` 补：
+  - 用 `kinematics.velocity_from_positions` 得到切向单元 `t̂(t)`，法向 `n̂(t)=R90·t̂(t)`，
+  - 将 `p(t)-p(t0)` 在 `{t̂(t), n̂(t)}` 上投影（或只输出速度在切/法方向的分量）。
+- 若需角度范围统一，可在 `polar_series` 增加 `normalize_to=(-pi, pi)` 或 `(0, 2pi)` 的后处理。
+
+---
+
+## 新增：`viz/merge.py`（把多张图合成一张）
+```python
+# src/viz/merge.py
+from __future__ import annotations
+import io, math
+from typing import Iterable, Union
+
+try:
+    from PIL import Image, ImageOps
+except Exception as e:
+    raise RuntimeError("viz.merge requires Pillow. pip install pillow") from e
+
+# 支持的对象：matplotlib Figure、Axes、PNG 文件路径
+MatObj = Union["matplotlib.figure.Figure", "matplotlib.axes.Axes", str]
+
+def _to_image(obj: MatObj, dpi: int = 150, tight: bool = True) -> Image.Image:
+    if isinstance(obj, str):
+        im = Image.open(obj)
+        return im.convert("RGBA") if im.mode != "RGBA" else im
+    # 延迟导入 matplotlib 以减少常驻依赖
+    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
+    from matplotlib.axes import Axes
+    if isinstance(obj, Axes):
+        fig = obj.figure
+    elif isinstance(obj, Figure):
+        fig = obj
+    else:
+        raise TypeError(f"Unsupported object type: {type(obj)}")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight" if tight else None)
+    buf.seek(0)
+    im = Image.open(buf)
+    return im.convert("RGBA") if im.mode != "RGBA" else im
+
+def merge(objects: Iterable[MatObj], out_png: str | None = None, *, ncols: int = 2,
+          pad: int = 10, bg: str = "white", dpi: int = 150, equalize: str = "height") -> Image.Image:
+    """把多张图（Figure/Axes/PNG 路径）拼成一张面板图。
+
+    - ncols: 每行列数；行数自动 = ceil(N/ncols)
+    - pad: 砖块与画布的像素间距
+    - bg: 背景颜色（"white" 或 "transparent"）
+    - equalize: "height" | "width"，对齐各子图的高度或宽度
+    - 返回 Pillow Image；如给出 out_png 则保存
+    """
+    imgs = [_to_image(o, dpi=dpi) for o in objects]
+    if not imgs:
+        raise ValueError("no images to merge")
+
+    # 尺寸对齐
+    if equalize == "height":
+        h = max(im.height for im in imgs)
+        imgs = [ImageOps.contain(im, (int(im.width * h / im.height), h)) if im.height != h else im for im in imgs]
+    elif equalize == "width":
+        w = max(im.width for im in imgs)
+        imgs = [ImageOps.contain(im, (w, int(im.height * w / im.width))) if im.width != w else im for im in imgs]
+
+    n = len(imgs)
+    rows = math.ceil(n / ncols)
+    colw = [0] * ncols
+    rowh = [0] * rows
+    for idx, im in enumerate(imgs):
+        r, c = divmod(idx, ncols)
+        colw[c] = max(colw[c], im.width)
+        rowh[r] = max(rowh[r], im.height)
+
+    total_w = sum(colw) + pad * (ncols + 1)
+    total_h = sum(rowh) + pad * (rows + 1)
+    base = Image.new("RGBA", (total_w, total_h), (255, 255, 255, 0) if bg == "transparent" else bg)
+
+    y = pad
+    for r in range(rows):
+        x = pad
+        for c in range(ncols):
+            idx = r * ncols + c
+            if idx >= n:
+                break
+            im = imgs[idx]
+            dx = (colw[c] - im.width) // 2
+            dy = (rowh[r] - im.height) // 2
+            base.paste(im, (x + dx, y + dy), mask=im if im.mode == "RGBA" else None)
+            x += colw[c] + pad
+        y += rowh[r] + pad
+
+    out = base if bg == "transparent" else base.convert("RGB")
+    if out_png:
+        out.save(out_png, dpi=(dpi, dpi))
+    return out
+
+# 便捷：仅合并 PNG 路径
+
+def merge_paths(paths: Iterable[str], out_png: str, **kw) -> str:
+    merge(paths, out_png=out_png, **kw)
+    return out_png
+```
+
+### 合并面板：快速使用
+```python
+from apps.common_io import merge_plots
+merge_plots(["heatmap_speed.png", "node101_path.png", "node101_vel.png"], out_png="panel.png", ncols=2)
+# 或
+# merge_plots([fig1, ax2, "some_saved_plot.png"], out_png="panel.png", ncols=3, bg="transparent")
+```
 
