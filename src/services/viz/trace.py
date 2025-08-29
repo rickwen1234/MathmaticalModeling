@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from ..metrics.kinematics import velocity_from_positions, accel_mag_from_positions
 
 
-__all__ = ["node_path", "node_velocity", "node_accelerate"]
+__all__ = ["node_path", "node_velocity", "node_accelerate", "node_accelelerate"]
 
 
 def node_path(t, pos, node=0, title=None, out_png=None):
@@ -84,3 +84,8 @@ def node_accelerate(t, pos=None, vel=None, acc=None, node=0, title=None, out_png
     if out_png:
         plt.savefig(out_png, dpi=150, bbox_inches="tight")
     plt.show()
+
+# Backwards-compatible alias to accommodate a previous misspelling in imports
+def node_accelelerate(*args, **kwargs):
+    """Alias for node_accelerate (keeps compatibility with older code that used the misspelling)."""
+    return node_accelerate(*args, **kwargs)

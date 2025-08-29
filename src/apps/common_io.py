@@ -6,17 +6,20 @@ Includes functions for exporting chain data to CSV/XLSX and plotting results.
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from services.viz.trace import node_path, node_velocity, node_accelelerate
+from services.viz.trace import node_path, node_velocity, node_accelerate
 from services.viz.heatmap import heatmap_accel, heatmap_speed
 from services.metrics.coords import coords_df, polar_series, orthogonal_series, export_node_coords_csv
+from services.viz.merge import _to_image, merge
 
 __all__ = [
     # export functions
     "export_chain_csv", "export_chain_xlsx",
     # output visualization functions
-    "plot_heatmap", "heatmap_speed", "heatmap_accel", "node_path", "node_velocity", "node_accelerate" "plot_speed_heatmap", "plot_path",
+    "plot_heatmap", "heatmap_speed", "heatmap_accel", "node_path", "node_velocity", "node_accelerate", "plot_speed_heatmap", "plot_path",
     # output node coordinates in different coordinate systems
     "polar_series", "orthogonal_series", "coords_df", "export_node_coords_csv"
+    #create merged images
+    "_to_image", "merge"
 ]
 
 def export_chain_csv(path, t_arr, positions, velocities, labels, out_csv):
